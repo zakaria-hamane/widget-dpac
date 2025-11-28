@@ -92,11 +92,11 @@ export default function ChatCard(): React.ReactElement {
   };
 
   /**
-   * Poll Supabase for the assistant's response
+   * Poll Celery/Flower for the task result
    */
   const pollForResponse = useCallback(async (
-    workflowId: string,
-    afterTimestamp: string
+    requestTime: number,
+    tasks: Array<{ task_id: string; step_name: string; status: string }>
   ): Promise<string | null> => {
     // Create abort controller for this polling session
     pollAbortRef.current = new AbortController();
@@ -109,6 +109,19 @@ export default function ChatCard(): React.ReactElement {
       "Preparo la risposta...",
       "Ancora un momento...",
     ];
+
+    // Find the final task that will contain the LLM output
+    const finalTask = tasks.find(t => 
+      t.step_name === 'combine_vector_response_and_references' ||
+      t.step_name === 'combine_response_and_references'
+    ) || tasks[tasks.length - 1];
+
+    if (!finalTask) {
+      console.error('No final task found in workflow');
+      return null;
+    }
+
+    console.log('🎯 Polling for response after:', new Date(requestTime).toISOString());
 
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
       if (signal.aborted) {
@@ -123,9 +136,8 @@ export default function ChatCard(): React.ReactElement {
         console.log(`🔄 Polling attempt ${attempt + 1}/${MAX_POLL_ATTEMPTS}`);
 
         const params = new URLSearchParams({
-          session_id: sessionId,
-          after: afterTimestamp,
-          workflow_id: workflowId,
+          task_id: finalTask.task_id,
+          request_time: requestTime.toString(),
         });
 
         const response = await fetch(`/api/chat/poll?${params}`, {
@@ -144,7 +156,12 @@ export default function ChatCard(): React.ReactElement {
           return data.message.content;
         }
 
-        console.log('⏳ No response yet, continuing to poll...');
+        if (data.state === 'FAILURE') {
+          console.error('❌ Task failed');
+          return null;
+        }
+
+        console.log('⏳ Task state:', data.state || 'PENDING');
       } catch (error) {
         if (signal.aborted) {
           return null;
@@ -158,7 +175,7 @@ export default function ChatCard(): React.ReactElement {
 
     console.log('⚠️ Polling timeout reached');
     return null;
-  }, [sessionId]);
+  }, []);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -186,6 +203,9 @@ export default function ChatCard(): React.ReactElement {
       
       console.log('📤 ChatCard: Sending to API:', payload);
       
+      // Record request time for polling (to filter old tasks)
+      const requestTime = Date.now();
+      
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -206,6 +226,7 @@ export default function ChatCard(): React.ReactElement {
       // Check if it's an async workflow response
       if (data.workflow_id && data.tasks) {
         console.log('🔄 Async workflow initiated:', data.workflow_id);
+        console.log('📋 Tasks:', data.tasks.map((t: { step_name: string }) => t.step_name).join(', '));
         
         // Add a streaming placeholder message
         const streamingMessage: Message = {
@@ -216,8 +237,8 @@ export default function ChatCard(): React.ReactElement {
         };
         setMessages((prev) => [...prev, streamingMessage]);
         
-        // Poll for the actual response from Supabase
-        const actualResponse = await pollForResponse(data.workflow_id, messageTimestamp);
+        // Poll Celery/Flower for the task result using the request timestamp
+        const actualResponse = await pollForResponse(requestTime, data.tasks);
         
         // Remove the streaming placeholder and add the real response
         setMessages((prev) => {
