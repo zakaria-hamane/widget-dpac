@@ -18,9 +18,6 @@
 .DS_Store
 *.pem
 
-# markdown files
-*.md
-
 # PowerShell test files
 *.ps1
 
