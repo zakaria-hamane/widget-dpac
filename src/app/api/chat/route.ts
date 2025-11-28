@@ -27,7 +27,10 @@ export async function POST(request: NextRequest) {
     console.log('📤 Sending to backend:', backendPayload);
     
     // Appel à l'API backend
-    const response = await fetch('http://72.146.30.121:8002/api/chat/vector_inference', {
+    const backendUrl = process.env.BACKEND_API_URL || 'http://72.146.12.109:8002';
+    console.log('🌐 Backend URL:', backendUrl);
+    
+    const response = await fetch(`${backendUrl}/api/chat/vector_inference`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

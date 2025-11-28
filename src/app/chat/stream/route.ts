@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
         console.log('[/chat/stream] Calling backend API...');
 
         // Call backend API
-        const backendUrl = process.env.BACKEND_API_URL || 'http://72.146.30.121:8002';
+        const backendUrl = process.env.BACKEND_API_URL || 'http://72.146.12.109:8002';
         const response = await fetch(`${backendUrl}/api/chat/vector_inference`, {
           method: 'POST',
           headers: {
