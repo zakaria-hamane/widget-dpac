@@ -3,6 +3,7 @@
  * 
  * Validates JWT tokens from the DPaC Portal (WSO2 Identity Server)
  * Supports both LDAP and SPID user authentication
+ * USER ID PRIORITY: email > fiscalNumber > sub
  */
 
 import * as jose from 'jose';
@@ -140,24 +141,27 @@ export async function validateDpacJwt(token: string): Promise<ValidationResult> 
     const jwtPayload = payload as unknown as DpacJwtPayload;
 
     // 5. Determine user type and ID
+    // PRIORITY: email > fiscalNumber > sub
     let userId: string;
     let authType: 'LDAP' | 'SPID';
 
-    if (jwtPayload.fiscalNumber) {
-      // SPID user (identified by fiscal code)
-      userId = jwtPayload.fiscalNumber;
-      authType = 'SPID';
-      console.log('[DPaC Auth] SPID user identified:', userId);
-    } else if (jwtPayload.email) {
-      // LDAP user (identified by email)
+    // Priority 1: Use email if available (LDAP users always have email)
+    if (jwtPayload.email) {
       userId = jwtPayload.email;
       authType = 'LDAP';
-      console.log('[DPaC Auth] LDAP user identified:', userId);
-    } else {
-      // Fallback to sub claim
+      console.log('[DPaC Auth] LDAP user identified by email:', userId);
+    }
+    // Priority 2: Use fiscalNumber for SPID users (no email)
+    else if (jwtPayload.fiscalNumber) {
+      userId = jwtPayload.fiscalNumber;
+      authType = 'SPID';
+      console.log('[DPaC Auth] SPID user identified by fiscalNumber:', userId);
+    }
+    // Priority 3: Fallback to sub claim
+    else {
       userId = jwtPayload.sub;
       authType = 'LDAP';
-      console.log('[DPaC Auth] Fallback to sub:', userId);
+      console.log('[DPaC Auth] User identified by sub (fallback):', userId);
     }
 
     return {
@@ -247,6 +251,7 @@ export function createSession(validationResult: ValidationResult, ttlSeconds?: n
   // Store session
   sessions.set(session.sessionId, session);
   console.log('[DPaC Auth] Session created:', session.sessionId, 'expires:', expiresAt.toISOString());
+  console.log('[DPaC Auth] User ID:', session.userId);
 
   // Schedule cleanup
   setTimeout(() => {
@@ -332,4 +337,3 @@ export function buildSessionCookie(sessionId: string, ttlSeconds?: number): stri
 
   return parts.join('; ');
 }
-

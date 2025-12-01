@@ -56,7 +56,7 @@ export default function ChatCard(): React.ReactElement {
       if (event.data?.type === "dpac.widget.filesSelected") {
         const files = event.data.payload?.files || [];
         setSelectedFiles(files);
-        console.log('📎 ChatCard: Files selected:', files);
+        console.log('ðŸ“Ž ChatCard: Files selected:', files);
       }
     };
 
@@ -121,11 +121,11 @@ export default function ChatCard(): React.ReactElement {
       return null;
     }
 
-    console.log('🎯 Polling for response after:', new Date(requestTime).toISOString());
+    console.log('ðŸŽ¯ Polling for response after:', new Date(requestTime).toISOString());
 
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
       if (signal.aborted) {
-        console.log('🛑 Polling aborted');
+        console.log('ðŸ›‘ Polling aborted');
         return null;
       }
 
@@ -133,7 +133,7 @@ export default function ChatCard(): React.ReactElement {
       setLoadingText(loadingMessages[Math.min(attempt, loadingMessages.length - 1)]);
 
       try {
-        console.log(`🔄 Polling attempt ${attempt + 1}/${MAX_POLL_ATTEMPTS}`);
+        console.log(`ðŸ”„ Polling attempt ${attempt + 1}/${MAX_POLL_ATTEMPTS}`);
 
         const params = new URLSearchParams({
           task_id: finalTask.task_id,
@@ -152,16 +152,16 @@ export default function ChatCard(): React.ReactElement {
         const data = await response.json();
 
         if (data.found && data.message?.content) {
-          console.log('✅ Response found:', data.message.content.substring(0, 100));
+          console.log('âœ… Response found:', data.message.content.substring(0, 100));
           return data.message.content;
         }
 
         if (data.state === 'FAILURE') {
-          console.error('❌ Task failed');
+          console.error('âŒ Task failed');
           return null;
         }
 
-        console.log('⏳ Task state:', data.state || 'PENDING');
+        console.log('â³ Task state:', data.state || 'PENDING');
       } catch (error) {
         if (signal.aborted) {
           return null;
@@ -173,7 +173,7 @@ export default function ChatCard(): React.ReactElement {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
     }
 
-    console.log('⚠️ Polling timeout reached');
+    console.log('âš ï¸ Polling timeout reached');
     return null;
   }, []);
 
@@ -201,7 +201,7 @@ export default function ChatCard(): React.ReactElement {
         session_id: sessionId,
       };
       
-      console.log('📤 ChatCard: Sending to API:', payload);
+      console.log('ðŸ“¤ ChatCard: Sending to API:', payload);
       
       // Record request time for polling (to filter old tasks)
       const requestTime = Date.now();
@@ -219,19 +219,19 @@ export default function ChatCard(): React.ReactElement {
       }
 
       const data = await response.json();
-      console.log('📨 ChatCard: Received response:', data);
+      console.log('ðŸ“¨ ChatCard: Received response:', data);
       
       let responseContent = "";
       
       // Check if it's an async workflow response
       if (data.workflow_id && data.tasks) {
-        console.log('🔄 Async workflow initiated:', data.workflow_id);
-        console.log('📋 Tasks:', data.tasks.map((t: { step_name: string }) => t.step_name).join(', '));
+        console.log('ðŸ”„ Async workflow initiated:', data.workflow_id);
+        console.log('ðŸ“‹ Tasks:', data.tasks.map((t: { step_name: string }) => t.step_name).join(', '));
         
         // Add a streaming placeholder message
         const streamingMessage: Message = {
           role: "assistant",
-          content: "⏳ Elaborazione in corso...",
+          content: "Elaborazione in corso...",
           timestamp: new Date(),
           isStreaming: true,
         };
@@ -260,7 +260,7 @@ export default function ChatCard(): React.ReactElement {
       } else {
         // No recognizable response
         responseContent = "Nessuna risposta ricevuta.";
-        console.warn('⚠️ Unknown response format:', data);
+        console.warn('âš ï¸ Unknown response format:', data);
       }
       
       const assistantMessage: Message = {
@@ -278,7 +278,7 @@ export default function ChatCard(): React.ReactElement {
         const filtered = prev.filter(m => !m.isStreaming);
         const errorMessage: Message = {
           role: "assistant",
-          content: "Mi dispiace, si è verificato un errore. Riprova più tardi.",
+          content: "Mi dispiace, si Ã¨ verificato un errore. Riprova piÃ¹ tardi.",
           timestamp: new Date(),
         };
         return [...filtered, errorMessage];
