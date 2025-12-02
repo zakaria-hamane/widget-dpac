@@ -87,6 +87,8 @@ export async function GET(request: NextRequest) {
             top_k: 5,
             limit: 10,
             workflow_id: 'vector_inference_001',
+            out_of_context_detection: true,
+            detect_sensitive_topics: true,
             ...(files.length > 0 && { files }),
           },
         };

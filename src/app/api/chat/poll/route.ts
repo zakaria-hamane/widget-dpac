@@ -2,33 +2,17 @@
  * GET /api/chat/poll
  * 
  * Poll for chat response by checking Celery task status via Flower API.
- * Uses timestamp to find the most recent completed task with llm_output.
+ * Directly checks the specific task_id for combine_response_and_references.
  * 
  * Query Parameters:
- * - task_id: The Celery task ID to check (from backend response)
- * - request_time: Unix timestamp when the request was made (to filter old tasks)
+ * - task_id: The Celery task ID to check (the combine_response_and_references task)
+ * - request_time: Unix timestamp when the request was made
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
 // Flower API configuration (Celery monitoring)
 const FLOWER_URL = process.env.FLOWER_URL || 'http://72.146.12.109:5555';
-
-interface FlowerTaskInfo {
-  uuid: string;
-  name: string;
-  state: string;
-  received: number;
-  started: number;
-  succeeded: number;
-  result?: unknown;
-  args?: string;
-  kwargs?: string;
-}
-
-interface FlowerTasksResponse {
-  [taskId: string]: FlowerTaskInfo;
-}
 
 /**
  * Convert Python dict string to proper object
@@ -65,16 +49,16 @@ function parsePythonDict(input: unknown): Record<string, unknown> | null {
       jsonString = jsonString.replace(/\\'/g, "'");
       
       return JSON.parse(jsonString);
-    } catch (e) {
-      // If still failing, try regex extraction
+    } catch {
+      // If still failing, try regex extraction for llm_output
       try {
-        // Extract llm_output using regex if present
-        const llmOutputMatch = input.match(/'llm_output':\s*'([^']*(?:\\'[^']*)*)'/s);
+        // Try to extract llm_output with regex - handles nested quotes
+        const llmOutputMatch = input.match(/"llm_output":\s*"((?:[^"\\]|\\.)*)"/s);
         if (llmOutputMatch) {
           const llmOutput = llmOutputMatch[1]
-            .replace(/\\'/g, "'")
+            .replace(/\\"/g, '"')
             .replace(/\\n/g, '\n')
-            .replace(/\\"/g, '"');
+            .replace(/\\'/g, "'");
           
           return {
             response: {
@@ -83,16 +67,18 @@ function parsePythonDict(input: unknown): Record<string, unknown> | null {
           };
         }
         
-        // Extract direct response if llm_output not found
-        const responseMatch = input.match(/'response':\s*'([^']*(?:\\'[^']*)*)'/s);
-        if (responseMatch) {
-          const response = responseMatch[1]
+        // Try with single quotes
+        const llmOutputMatchSingle = input.match(/'llm_output':\s*'((?:[^'\\]|\\.)*)'/s);
+        if (llmOutputMatchSingle) {
+          const llmOutput = llmOutputMatchSingle[1]
             .replace(/\\'/g, "'")
             .replace(/\\n/g, '\n')
             .replace(/\\"/g, '"');
           
           return {
-            response: response
+            response: {
+              llm_output: llmOutput
+            }
           };
         }
       } catch (regexError) {
@@ -106,19 +92,76 @@ function parsePythonDict(input: unknown): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Extract llm_output directly from raw result string using regex
+ * More reliable than full parsing for complex Python dicts
+ */
+function extractLlmOutputFromRaw(result: unknown): string | undefined {
+  if (typeof result !== 'string') {
+    // If it's already an object, try to access it directly
+    if (typeof result === 'object' && result !== null) {
+      const obj = result as Record<string, unknown>;
+      if (obj.response && typeof obj.response === 'object') {
+        const response = obj.response as Record<string, unknown>;
+        if (typeof response.llm_output === 'string') {
+          return response.llm_output;
+        }
+      }
+    }
+    return undefined;
+  }
+  
+  // Try different regex patterns to extract llm_output from the raw string
+  const patterns = [
+    // Pattern 1: 'llm_output': 'content...'
+    /'llm_output':\s*'((?:[^'\\]|\\.|'')*?)'\s*[,}]/s,
+    // Pattern 2: "llm_output": "content..."
+    /"llm_output":\s*"((?:[^"\\]|\\.)*)"\s*[,}]/s,
+    // Pattern 3: Handle multi-line with escaped quotes
+    /'llm_output':\s*"((?:[^"\\]|\\.)*)"\s*[,}]/s,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = result.match(pattern);
+    if (match && match[1]) {
+      let output = match[1]
+        // Unescape common escape sequences
+        .replace(/\\'/g, "'")
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t')
+        .replace(/''/g, "'"); // Python's escaped single quote inside single-quoted string
+      
+      // Only return if we got substantial content
+      if (output.length > 10) {
+        return output;
+      }
+    }
+  }
+  
+  return undefined;
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const taskId = searchParams.get('task_id');
   const requestTimeStr = searchParams.get('request_time');
   
-  // Convert request_time to seconds (Flower uses Unix timestamp in seconds)
-  const requestTime = requestTimeStr ? parseInt(requestTimeStr) / 1000 : (Date.now() / 1000 - 60);
+  if (!taskId) {
+    return NextResponse.json(
+      { success: false, error: 'Missing task_id parameter' },
+      { status: 400 }
+    );
+  }
 
-  console.log('[/api/chat/poll] Polling for task:', { taskId, requestTime: new Date(requestTime * 1000).toISOString() });
+  console.log('[/api/chat/poll] Polling for task:', { 
+    taskId, 
+    requestTime: requestTimeStr ? new Date(parseInt(requestTimeStr)).toISOString() : 'N/A'
+  });
 
   try {
-    // Search for recent llm_call tasks that completed AFTER our request time
-    const result = await findRecentLlmOutput(requestTime);
+    // Directly check the specific task by ID
+    const result = await checkTaskById(taskId);
     
     if (result.found && result.message?.content) {
       return NextResponse.json(result);
@@ -128,7 +171,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       found: false,
-      state: 'PENDING',
+      state: result.state || 'PENDING',
       message: null,
     });
 
@@ -142,114 +185,107 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Find the most recent llm_call task with llm_output that completed after requestTime
+ * Directly check a specific task by its ID
  */
-async function findRecentLlmOutput(requestTime: number): Promise<{
+async function checkTaskById(taskId: string): Promise<{
   success: boolean;
   found: boolean;
+  state?: string;
   message?: { content: string; references?: string[] };
 }> {
   try {
-    // Get recent successful tasks
-    const flowerApiUrl = `${FLOWER_URL}/api/tasks?limit=50&state=SUCCESS`;
-    console.log('[/api/chat/poll] Searching recent tasks after:', new Date(requestTime * 1000).toISOString());
+    // Get task info directly by ID
+    const taskInfoUrl = `${FLOWER_URL}/api/task/info/${taskId}`;
+    console.log('[/api/chat/poll] Checking task:', taskId);
 
-    const response = await fetch(flowerApiUrl, {
+    const response = await fetch(taskInfoUrl, {
       headers: { 'Accept': 'application/json' },
     });
 
     if (!response.ok) {
-      console.log('[/api/chat/poll] Failed to list tasks');
-      return { success: true, found: false };
+      console.log('[/api/chat/poll] Task not found or error:', response.status);
+      return { success: true, found: false, state: 'PENDING' };
     }
 
-    const tasks: FlowerTasksResponse = await response.json();
-    
-    // Filter llm_call tasks that completed AFTER our request time
-    const recentLlmTasks = Object.entries(tasks)
-      .filter(([, task]) => {
-        const isLlmCall = task.name === 'llm_call';
-        const completedAfterRequest = task.succeeded && task.succeeded > requestTime;
-        return isLlmCall && completedAfterRequest;
-      })
-      .sort(([, a], [, b]) => (b.succeeded || 0) - (a.succeeded || 0));
+    const taskInfo = await response.json();
+    console.log('[/api/chat/poll] Task state:', taskInfo.state);
 
-    console.log('[/api/chat/poll] Found', recentLlmTasks.length, 'llm_call tasks completed after request time');
+    // If task failed
+    if (taskInfo.state === 'FAILURE') {
+      console.error('[/api/chat/poll] Task failed:', taskInfo.result);
+      return { success: true, found: false, state: 'FAILURE' };
+    }
 
-    // Check each task for llm_output (most recent first)
-    for (const [taskId, task] of recentLlmTasks) {
-      try {
-        // Get full task info
-        const taskInfoUrl = `${FLOWER_URL}/api/task/info/${taskId}`;
-        const taskResponse = await fetch(taskInfoUrl, {
-          headers: { 'Accept': 'application/json' },
-        });
+    // If task is still pending/running
+    if (taskInfo.state !== 'SUCCESS') {
+      return { success: true, found: false, state: taskInfo.state };
+    }
 
-        if (!taskResponse.ok) continue;
-
-        const taskInfo = await taskResponse.json();
+    // Task succeeded - extract the result
+    if (taskInfo.result) {
+      // Log raw result for debugging
+      const rawResult = typeof taskInfo.result === 'string' 
+        ? taskInfo.result.substring(0, 500) 
+        : JSON.stringify(taskInfo.result).substring(0, 500);
+      console.log('[/api/chat/poll] Raw result preview:', rawResult);
+      
+      // Try to extract llm_output directly from raw string first (more reliable)
+      let llmOutput = extractLlmOutputFromRaw(taskInfo.result);
+      
+      if (!llmOutput) {
+        // Fall back to parsing the full object
+        const result = parsePythonDict(taskInfo.result);
         
-        if (taskInfo.state === 'SUCCESS' && taskInfo.result) {
-          const result = parsePythonDict(taskInfo.result);
+        if (result) {
+          // Try multiple paths to find llm_output
+          const responseObj = result.response as Record<string, unknown> | string | undefined;
           
-          if (result) {
-            // Try multiple paths to find llm_output
-            const responseObj = result.response as Record<string, unknown> | string | undefined;
-            
-            let llmOutput: string | undefined;
-            
-            // Path 1: response.llm_output (nested object)
-            if (typeof responseObj === 'object' && responseObj !== null) {
-              llmOutput = responseObj.llm_output as string | undefined;
-            }
-            
-            // Path 2: response is the direct string
-            if (!llmOutput && typeof responseObj === 'string') {
-              llmOutput = responseObj;
-            }
-            
-            // Path 3: Check if result itself has llm_output
-            if (!llmOutput && result.llm_output) {
-              llmOutput = result.llm_output as string;
-            }
-            
-            if (llmOutput) {
-              console.log('[/api/chat/poll] ✅ Found llm_output in task:', taskId);
-              console.log('[/api/chat/poll] Task completed at:', new Date((task.succeeded || 0) * 1000).toISOString());
-              console.log('[/api/chat/poll] Content preview:', llmOutput.substring(0, 100));
-              
-              let references: string[] = [];
-              try {
-                if (typeof responseObj === 'object' && responseObj !== null) {
-                  const refsStr = responseObj.references as string | undefined;
-                  if (refsStr && refsStr !== '[]') {
-                    references = JSON.parse(refsStr.replace(/'/g, '"'));
-                  }
-                }
-              } catch {
-                // Ignore reference parsing errors
-              }
-              
-              return {
-                success: true,
-                found: true,
-                message: {
-                  content: llmOutput,
-                  references,
-                },
-              };
-            }
+          // Path 1: response.llm_output (nested object) - this is the expected format
+          if (typeof responseObj === 'object' && responseObj !== null) {
+            llmOutput = responseObj.llm_output as string | undefined;
+          }
+          
+          // Path 2: Check if result itself has llm_output
+          if (!llmOutput && result.llm_output) {
+            llmOutput = result.llm_output as string;
           }
         }
-      } catch (error) {
-        console.error('[/api/chat/poll] Error checking task:', taskId, error);
-        continue;
+      }
+      
+      if (llmOutput) {
+        console.log('[/api/chat/poll] ✅ Found llm_output in task:', taskId);
+        console.log('[/api/chat/poll] Content preview:', llmOutput.substring(0, 100));
+        
+        let references: string[] = [];
+        // Try to extract references too
+        try {
+          const refsMatch = typeof taskInfo.result === 'string' 
+            ? taskInfo.result.match(/'references':\s*'(\[.*?\])'/s)
+            : null;
+          if (refsMatch && refsMatch[1] !== '[]') {
+            references = JSON.parse(refsMatch[1].replace(/'/g, '"'));
+          }
+        } catch {
+          // Ignore reference parsing errors
+        }
+        
+        return {
+          success: true,
+          found: true,
+          state: 'SUCCESS',
+          message: {
+            content: llmOutput,
+            references,
+          },
+        };
+      } else {
+        console.log('[/api/chat/poll] Task succeeded but no llm_output found');
       }
     }
 
-    return { success: true, found: false };
+    return { success: true, found: false, state: 'SUCCESS' };
   } catch (error) {
-    console.error('[/api/chat/poll] Error searching tasks:', error);
-    return { success: true, found: false };
+    console.error('[/api/chat/poll] Error checking task:', error);
+    return { success: true, found: false, state: 'ERROR' };
   }
 }

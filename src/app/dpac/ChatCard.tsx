@@ -27,6 +27,7 @@ export default function ChatCard(): React.ReactElement {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState("Sto pensando...");
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string>("dpac_portal"); // Default project
   const [sessionId] = useState(() => `session_${Date.now()}`);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollAbortRef = useRef<AbortController | null>(null);
@@ -50,13 +51,21 @@ export default function ChatCard(): React.ReactElement {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Listen for selected files from FileSelect
+  // Listen for selected files and project from other widgets
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === "dpac.widget.filesSelected") {
         const files = event.data.payload?.files || [];
         setSelectedFiles(files);
-        console.log('ðŸ“Ž ChatCard: Files selected:', files);
+        console.log('📎 ChatCard: Files selected:', files);
+      }
+      
+      if (event.data?.type === "dpac.widget.projectSelected") {
+        const project = event.data.payload?.project;
+        if (project) {
+          setSelectedProject(project);
+          console.log('📁 ChatCard: Project selected:', project);
+        }
       }
     };
 
@@ -197,6 +206,7 @@ export default function ChatCard(): React.ReactElement {
         question: inputValue,
         files: selectedFiles,
         domain_id: "dpac",
+        project_id: selectedProject,
         language: "it",
         session_id: sessionId,
       };

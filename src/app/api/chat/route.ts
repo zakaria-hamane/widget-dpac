@@ -19,6 +19,8 @@ export async function POST(request: NextRequest) {
         top_k: body.top_k || 5,
         limit: body.limit || 10,
         workflow_id: body.workflow_id || "vector_inference_001",
+        out_of_context_detection: body.out_of_context_detection ?? true,
+        detect_sensitive_topics: body.detect_sensitive_topics ?? true,
         // Optionnel: inclure les fichiers si fournis
         ...(body.files && body.files.length > 0 && { files: body.files })
       }
