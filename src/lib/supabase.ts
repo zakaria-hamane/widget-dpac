@@ -200,4 +200,3 @@ export function subscribeToMessages(
     supabase.removeChannel(channel);
   };
 }
-

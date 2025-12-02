@@ -32,7 +32,7 @@ interface FlowerTasksResponse {
 
 /**
  * Convert Python dict string to proper object
- * Handles single quotes and Python-specific syntax
+ * Handles single quotes, newlines, and Python-specific syntax
  */
 function parsePythonDict(input: unknown): Record<string, unknown> | null {
   // If already an object, return it
@@ -48,22 +48,57 @@ function parsePythonDict(input: unknown): Record<string, unknown> | null {
     // First try standard JSON parse
     return JSON.parse(input);
   } catch {
-    // Convert Python dict to JSON - handle newlines in strings
+    // Convert Python dict to JSON
     try {
-      // Replace newlines within strings with escaped newlines
       let jsonString = input
         // Replace Python None with null
         .replace(/\bNone\b/g, 'null')
         // Replace Python True/False with true/false
         .replace(/\bTrue\b/g, 'true')
-        .replace(/\bFalse\b/g, 'false')
-        // Replace single quotes with double quotes
-        .replace(/'/g, '"')
-        // Handle newlines in string values (escape them)
-        .replace(/\n/g, '\\n');
+        .replace(/\bFalse\b/g, 'false');
+      
+      // Handle single quotes more carefully
+      // Replace single quotes with double quotes, but preserve escaped quotes
+      jsonString = jsonString.replace(/(?<!\\)'/g, '"');
+      
+      // Fix escaped single quotes (change \' to ')
+      jsonString = jsonString.replace(/\\'/g, "'");
       
       return JSON.parse(jsonString);
     } catch (e) {
+      // If still failing, try regex extraction
+      try {
+        // Extract llm_output using regex if present
+        const llmOutputMatch = input.match(/'llm_output':\s*'([^']*(?:\\'[^']*)*)'/s);
+        if (llmOutputMatch) {
+          const llmOutput = llmOutputMatch[1]
+            .replace(/\\'/g, "'")
+            .replace(/\\n/g, '\n')
+            .replace(/\\"/g, '"');
+          
+          return {
+            response: {
+              llm_output: llmOutput
+            }
+          };
+        }
+        
+        // Extract direct response if llm_output not found
+        const responseMatch = input.match(/'response':\s*'([^']*(?:\\'[^']*)*)'/s);
+        if (responseMatch) {
+          const response = responseMatch[1]
+            .replace(/\\'/g, "'")
+            .replace(/\\n/g, '\n')
+            .replace(/\\"/g, '"');
+          
+          return {
+            response: response
+          };
+        }
+      } catch (regexError) {
+        console.error('[parsePythonDict] Regex extraction failed:', regexError);
+      }
+      
       // Log only first 200 chars for debugging
       console.log('[parsePythonDict] Failed to parse:', input.substring(0, 200));
       return null;
@@ -130,10 +165,7 @@ async function findRecentLlmOutput(requestTime: number): Promise<{
 
     const tasks: FlowerTasksResponse = await response.json();
     
-    // Filter llm_call tasks that:
-    // 1. Are named 'llm_call'
-    // 2. Completed AFTER our request time
-    // Sort by succeeded time (most recent first)
+    // Filter llm_call tasks that completed AFTER our request time
     const recentLlmTasks = Object.entries(tasks)
       .filter(([, task]) => {
         const isLlmCall = task.name === 'llm_call';
@@ -161,8 +193,25 @@ async function findRecentLlmOutput(requestTime: number): Promise<{
           const result = parsePythonDict(taskInfo.result);
           
           if (result) {
-            const responseObj = result.response as Record<string, unknown> | undefined;
-            const llmOutput = responseObj?.llm_output as string | undefined;
+            // Try multiple paths to find llm_output
+            const responseObj = result.response as Record<string, unknown> | string | undefined;
+            
+            let llmOutput: string | undefined;
+            
+            // Path 1: response.llm_output (nested object)
+            if (typeof responseObj === 'object' && responseObj !== null) {
+              llmOutput = responseObj.llm_output as string | undefined;
+            }
+            
+            // Path 2: response is the direct string
+            if (!llmOutput && typeof responseObj === 'string') {
+              llmOutput = responseObj;
+            }
+            
+            // Path 3: Check if result itself has llm_output
+            if (!llmOutput && result.llm_output) {
+              llmOutput = result.llm_output as string;
+            }
             
             if (llmOutput) {
               console.log('[/api/chat/poll] ✅ Found llm_output in task:', taskId);
@@ -171,9 +220,11 @@ async function findRecentLlmOutput(requestTime: number): Promise<{
               
               let references: string[] = [];
               try {
-                const refsStr = responseObj?.references as string | undefined;
-                if (refsStr && refsStr !== '[]') {
-                  references = JSON.parse(refsStr.replace(/'/g, '"'));
+                if (typeof responseObj === 'object' && responseObj !== null) {
+                  const refsStr = responseObj.references as string | undefined;
+                  if (refsStr && refsStr !== '[]') {
+                    references = JSON.parse(refsStr.replace(/'/g, '"'));
+                  }
                 }
               } catch {
                 // Ignore reference parsing errors
