@@ -6,6 +6,25 @@ A Next.js-based chat widget that integrates with the DPaC Portal (DLWEB) for doc
 
 ---
 
+## ✅ Implementation Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Chat API** (`/api/chat`) | ✅ Done | Async workflow with Celery polling |
+| **Chat Polling** (`/api/chat/poll`) | ✅ Done | Polls Flower for task results |
+| **SSE Streaming** (`/chat/stream`) | ✅ Done | Server-Sent Events endpoint |
+| **Session Auth** (`/dpac/session`) | ✅ Done | JWT validation against WSO2 |
+| **JWT Validation** | ✅ Done | Supports LDAP & SPID tokens |
+| **MinIO Integration** | ✅ Done | Folders & files listing |
+| **Health Check** (`/api/health`) | ✅ Done | Service health monitoring |
+| **Widget Pages** | ✅ Done | Launcher, Modal, Source Picker, File Select |
+| **Overlay Controls** | ✅ Done | Backdrop, ESC key, emergency close |
+| **postMessage Events** | ✅ Done | Full iframe communication |
+| **CORS Configuration** | ✅ Done | next.config.js headers |
+| **Test Page** | ✅ Done | `/dpac/host-test` demo page |
+
+---
+
 ## 📋 Table of Contents
 
 1. [Quick Start](#-quick-start)
@@ -35,14 +54,14 @@ git clone https://github.dxc.com/hfnighar/dpac-widget.git
 cd dpac-widget
 
 # Install dependencies
-npm install
+npm install 
 
 # Create environment file
 cp .env.example .env.local
 # Edit .env.local with your configuration
 
 # Start development server
-npm run dev
+npm run dev 
 ```
 
 ### Test Page
@@ -281,6 +300,8 @@ Add these iframes to your HTML page:
 
 ### Option 2: Angular (DLWEB) Integration
 
+> **⚠️ Important**: Before opening the widget, you must call `POST /dpac/session` with the existing WSO2 JWT. See [POST /dpac/session](#post-dpacsession) for details.
+
 #### 1. Create the Widget Service
 
 ```typescript
@@ -303,7 +324,10 @@ export class DpacWidgetService {
 
   /**
    * Initialize the widget session using the existing DPaC Portal JWT.
-   * Call this before opening the widget.
+   * ⚠️ MUST be called before opening the widget!
+   * 
+   * The JWT is passed in the Authorization header.
+   * withCredentials: true is required for the session cookie to be set.
    */
   async initSession(): Promise<boolean> {
     // Get existing JWT from localStorage (already set by WSO2 login)
@@ -317,8 +341,11 @@ export class DpacWidgetService {
     try {
       const response = await this.http.post<{ success: boolean }>(
         '/dpac/session',
-        { jwt, ttl: 300 },
-        { withCredentials: true }
+        { ttl: 300 }, // Optional: session duration
+        { 
+          headers: { 'Authorization': `Bearer ${jwt}` },
+          withCredentials: true // ⚠️ Required for cookies!
+        }
       ).toPromise();
 
       return response?.success || false;
@@ -416,7 +443,7 @@ import { DpacWidgetService } from '../../services/dpac-widget.service';
       [style.display]="state === 'source-picker' || state === 'file-select' ? 'block' : 'none'"
       style="position:fixed;bottom:20px;right:322px;width:294px;height:418px;border:none;z-index:2147483002;">
     </iframe>
-
+    
     <!-- File Select -->
     <iframe id="dpac-file-select" [src]="fileSelectUrl"
       [style.display]="state === 'file-select' ? 'block' : 'none'"
@@ -613,20 +640,72 @@ export const DpacWidget: React.FC = () => {
 
 ### Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/dpac/session` | POST | Create authenticated session from DPaC JWT |
-| `/api/chat` | POST | Send chat message (non-streaming) |
-| `/chat/stream` | GET | SSE streaming chat responses |
-| `/api/minio/folders` | GET | List MinIO folders |
-| `/api/minio/files` | GET | List files in folder |
-| `/api/health` | GET | Health check |
+| Endpoint | Method | Description | Status |
+|----------|--------|-------------|--------|
+| `/dpac/session` | POST | Create authenticated session from DPaC JWT | ✅ |
+| `/api/chat` | POST | Send chat message (async workflow) | ✅ |
+| `/api/chat/poll` | GET | Poll for async chat response | ✅ |
+| `/chat/stream` | GET | SSE streaming chat responses | ✅ |
+| `/api/minio/folders` | GET | List MinIO folders | ✅ |
+| `/api/minio/files` | GET | List files in folder | ✅ |
+| `/api/minio/test` | GET | Test MinIO connection | ✅ |
+| `/api/health` | GET | Health check | ✅ |
+
+### POST /api/chat
+
+Send a chat message. Returns task IDs for async processing.
+
+**Request:**
+```bash
+curl -X POST /api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What is DPaC?",
+    "files": ["doc.pdf"],
+    "domain_id": "dpac",
+    "language": "it",
+    "session_id": "session_123"
+  }'
+```
+
+**Response:**
+```json
+{
+  "workflow_id": "vector_inference_001",
+  "tasks": [
+    {"step_name": "save_user_message", "task_id": "abc-123", "status": "PENDING"},
+    {"step_name": "combine_response_and_references", "task_id": "def-456", "status": "PENDING"}
+  ]
+}
+```
+
+### GET /api/chat/poll
+
+Poll for async chat response from Celery/Flower.
+
+**Request:**
+```
+GET /api/chat/poll?task_id=def-456&request_time=1701400000000
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "found": true,
+  "message": {
+    "content": "DPaC is the Digital Platform for Cultural Heritage...",
+    "references": []
+  }
+}
+```
 
 ### POST /dpac/session
 
-Create an authenticated session using the existing DPaC Portal JWT.
+Create an authenticated session using the existing DPaC Portal JWT. **Must be called before opening the widget.**
 
-**Request:**
+#### Option 1: JWT in Authorization Header (Recommended)
+
 ```bash
 curl -X POST /dpac/session \
   -H "Content-Type: application/json" \
@@ -634,16 +713,83 @@ curl -X POST /dpac/session \
   -d '{"ttl": 300}'
 ```
 
-**Response:**
+#### Option 2: JWT in Request Body
+
+```bash
+curl -X POST /dpac/session \
+  -H "Content-Type: application/json" \
+  -d '{"jwt": "<JWT_TOKEN>", "ttl": 300}'
+```
+
+#### Angular Usage (DLWEB)
+
+```typescript
+// dpac-widget.service.ts
+async initWidgetSession(): Promise<boolean> {
+  // Get existing WSO2 token from localStorage
+  const jwt = localStorage.getItem('access_token');
+  
+  if (!jwt) {
+    console.error('[DPaC] No JWT found - user must be logged in');
+    return false;
+  }
+
+  try {
+    const response = await this.http.post<{ success: boolean }>(
+      '/dpac/session',
+      { ttl: 300 }, // Optional: session duration in seconds
+      {
+        headers: { 'Authorization': `Bearer ${jwt}` },
+        withCredentials: true  // ⚠️ Important for cookies!
+      }
+    ).toPromise();
+
+    return response?.success || false;
+  } catch (error) {
+    console.error('[DPaC] Session creation failed:', error);
+    return false;
+  }
+}
+
+// Call before opening widget
+async openWidget(): Promise<void> {
+  const sessionOk = await this.initWidgetSession();
+  
+  if (sessionOk) {
+    this.widgetState = 'chat'; // Show widget
+  } else {
+    alert('Sessione scaduta. Effettuare nuovamente il login.');
+  }
+}
+```
+
+#### Parameters
+
+| Parameter | Location | Required | Description |
+|-----------|----------|----------|-------------|
+| `jwt` | Header (`Authorization: Bearer`) OR Body | **Yes** | The WSO2 JWT token |
+| `ttl` | Body | No | Session duration in seconds (default: 300) |
+
+#### Response
+
 ```json
 {
   "success": true,
   "session_id": "dpac_abc123",
-  "expires_at": "2025-11-28T11:00:00Z",
+  "expires_at": "2025-12-01T11:00:00Z",
   "user_id": "stefano.solli@cultura.gov.it",
   "auth_type": "LDAP"
 }
 ```
+
+#### Error Responses
+
+| Code | Error | Cause |
+|------|-------|-------|
+| 401 | `MISSING_JWT` | No JWT provided in header or body |
+| 401 | `TOKEN_EXPIRED` | JWT has expired |
+| 401 | `INVALID_TOKEN` | JWT signature invalid |
+| 401 | `INVALID_ISSUER` | JWT issuer not trusted |
 
 ### GET /chat/stream
 
@@ -683,6 +829,11 @@ MINIO_BUCKET=dpac
 # Backend API (Vector Inference - Async)
 # ============================================
 BACKEND_API_URL=http://72.146.12.109:8002
+
+# ============================================
+# Flower (Celery Monitoring) - for async polling
+# ============================================
+FLOWER_URL=http://72.146.12.109:5555
 
 # ============================================
 # Supabase Configuration (for async response retrieval)
@@ -857,4 +1008,4 @@ See [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md) for:
 
 ---
 
-*Last updated: November 28, 2025*
+*Last updated: December 1, 2025*

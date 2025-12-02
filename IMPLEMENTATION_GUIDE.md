@@ -86,10 +86,11 @@ D.PaC (Document Processing and Chat) is an embeddable chat widget that allows us
 
 | Requirement | Description | Status |
 |-------------|-------------|--------|
-| **Auth without second login** | JWT passed from host → session cookie | ❌ Not implemented |
+| **Auth without second login** | JWT passed from host → session cookie | ✅ Implemented |
 | **Overlay control** | Host can close widget even if it doesn't respond | ✅ Implemented |
-| **Streaming responses** | Real-time token streaming via SSE | ❌ Not implemented |
-| **Cross-origin iframe** | Widget embedded via iframe with proper cookie handling | ⚠️ Partial |
+| **Streaming responses** | Real-time token streaming via SSE | ✅ Implemented |
+| **Cross-origin iframe** | Widget embedded via iframe with proper cookie handling | ✅ Implemented |
+| **Async chat polling** | Poll Celery/Flower for task results | ✅ Implemented |
 
 ### 1.3 Stakeholders
 
@@ -255,12 +256,14 @@ The existing JWT from DLWEB is sufficient for widget authentication because:
 
 | Endpoint | Method | Purpose | Status |
 |----------|--------|---------|--------|
-| `/api/chat` | POST | Proxy to vector inference | ✅ Implemented |
+| `/api/chat` | POST | Async chat via vector inference | ✅ Implemented |
+| `/api/chat/poll` | GET | Poll Celery/Flower for task results | ✅ Implemented |
 | `/api/minio/folders` | GET | List MinIO folders | ✅ Implemented |
 | `/api/minio/files` | GET | List files in folder | ✅ Implemented |
 | `/api/minio/test` | GET | Test MinIO connection | ✅ Implemented |
-| `/dpac/session` | POST | Create auth session | ❌ Not implemented |
-| `/chat/stream` | GET | SSE streaming | ❌ Not implemented |
+| `/api/health` | GET | Service health check | ✅ Implemented |
+| `/dpac/session` | POST | JWT validation & session creation | ✅ Implemented |
+| `/chat/stream` | GET | SSE streaming responses | ✅ Implemented |
 
 ---
 
@@ -290,16 +293,24 @@ The existing JWT from DLWEB is sufficient for widget authentication because:
 - Response display
 - Loading states
 
-### 3.2 What's Missing
+### 3.2 What's Implemented (Recent)
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| `/dpac/session` endpoint | ✅ Done | JWT validation against WSO2, session cookie creation |
+| SSE Streaming | ✅ Done | Real-time token streaming via `/chat/stream` |
+| Async Chat Polling | ✅ Done | Polls Celery/Flower for task results via `/api/chat/poll` |
+| CORS configuration | ✅ Done | Headers configured in `next.config.js` |
+| JWT Validation | ✅ Done | `dpac-auth.ts` with LDAP/SPID support |
+| Health Check | ✅ Done | `/api/health` endpoint |
+
+### 3.3 Future Enhancements (Optional)
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| `/dpac/session` endpoint | **HIGH** | JWT validation and session cookie creation |
-| SSE Streaming | **HIGH** | Real-time token streaming via EventSource |
-| Auth events | **MEDIUM** | `dpac.auth: ok\|fail`, `dpac.widget.ready` |
-| CORS configuration | **MEDIUM** | Proper headers in next.config.js |
-| Login modal fallback | **MEDIUM** | In-widget login when session fails |
-| postMessage origin validation | **MEDIUM** | Replace `"*"` with specific origin |
+| Auth events | **LOW** | `dpac.auth: ok\|fail`, `dpac.widget.ready` events |
+| Login modal fallback | **LOW** | In-widget login when session fails |
+| postMessage origin validation | **LOW** | Replace `"*"` with specific origin |
 | `dpac-embed.min.js` | **LOW** | Bundled embed script (currently placeholder) |
 
 ---

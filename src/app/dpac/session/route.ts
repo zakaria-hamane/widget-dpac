@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     if (!jwt) {
       try {
         const body: SessionRequest = await request.json();
-        jwt = body.jwt;
+        jwt = body.jwt ?? null;
       } catch {
         // Body parsing failed, continue without body JWT
       }
