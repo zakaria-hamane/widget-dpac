@@ -2,23 +2,10 @@
 
 import React, { useEffect, useState } from "react";
 
-interface FileData {
-  name: string;
-  fullPath: string;
-  size: number;
-}
-
-interface ProjectData {
-  name: string;
-  files: FileData[];
-  isLoading: boolean;
-}
-
 export default function SourceCard(): React.ReactElement {
-  const [selectedProject, setSelectedProject] = useState<string>("");
-  const [expandedProjects, setExpandedProjects] = useState<string[]>([]);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
-  const [projects, setProjects] = useState<ProjectData[]>([]);
+  const [folders, setFolders] = useState<Array<{ name: string; prefix: string }>>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Notify parent that source picker is loaded
@@ -44,13 +31,7 @@ export default function SourceCard(): React.ReactElement {
         const data = await response.json();
         
         if (data.success && data.folders) {
-          // Initialize projects with empty files
-          const initialProjects: ProjectData[] = data.folders.map((folder: { name: string }) => ({
-            name: folder.name,
-            files: [],
-            isLoading: false
-          }));
-          setProjects(initialProjects);
+          setFolders(data.folders);
           console.log('✅ Folders loaded from MinIO:', data.folders);
         } else {
           console.error('❌ Failed to load folders:', data);
@@ -128,7 +109,7 @@ export default function SourceCard(): React.ReactElement {
       overflowY: "auto" as const,
       padding: "0 12px",
     },
-    projectRow: {
+    item: {
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
@@ -145,6 +126,7 @@ export default function SourceCard(): React.ReactElement {
       alignItems: "center",
       gap: 10,
       lineHeight: 0 as const,
+      marginLeft: 12,
     },
     folderCircle: {
       width: 26,
@@ -154,16 +136,16 @@ export default function SourceCard(): React.ReactElement {
       display: "grid",
       placeItems: "center",
     },
-    projectText: {
+    itemText: {
       fontSize: 12,
       color: "#000000",
       fontWeight: 600 as const,
       lineHeight: 1.2,
     },
-    radioButton: {
+    checkbox: {
       width: 20,
       height: 20,
-      borderRadius: "50%",
+      borderRadius: 4,
       border: "2px solid #CBD5E1",
       background: "#fff",
       boxSizing: "border-box" as const,
@@ -172,27 +154,9 @@ export default function SourceCard(): React.ReactElement {
       justifyContent: "center",
       transition: "all 0.2s ease",
     },
-    radioButtonSelected: {
-      borderColor: "#334C66",
-    },
-    radioButtonInner: {
-      width: 10,
-      height: 10,
-      borderRadius: "50%",
+    checkboxChecked: {
       background: "#334C66",
-    },
-    filesContainer: {
-      marginTop: 8,
-      marginLeft: 46,
-      padding: "8px 0",
-    },
-    fileItem: {
-      padding: "6px 8px",
-      fontSize: 11,
-      color: "#666",
-      borderRadius: 4,
-      marginBottom: 4,
-      transition: "all 0.2s ease",
+      borderColor: "#334C66",
     },
     footer: {
       borderTop: "0.524px solid #E8EBEC",
@@ -226,80 +190,41 @@ export default function SourceCard(): React.ReactElement {
     },
   } as const;
 
-  const toggleProject = (projectName: string) => {
-    // Radio button behavior - only one can be selected
-    setSelectedProject(prev => prev === projectName ? "" : projectName);
-  };
+  // Items are now loaded from MinIO API (see useEffect above)
 
-  const toggleExpanded = async (projectName: string) => {
-    const isExpanded = expandedProjects.includes(projectName);
-    
-    if (isExpanded) {
-      // Collapse
-      setExpandedProjects(prev => prev.filter(p => p !== projectName));
-    } else {
-      // Expand and load files if not already loaded
-      setExpandedProjects(prev => [...prev, projectName]);
-      
-      const project = projects.find(p => p.name === projectName);
-      if (project && project.files.length === 0 && !project.isLoading) {
-        // Load files for this project
-        setProjects(prev => prev.map(p => 
-          p.name === projectName ? { ...p, isLoading: true } : p
-        ));
-        
-        try {
-          const response = await fetch(`/api/minio/files?bucket=dpac&folder=${encodeURIComponent(projectName)}`);
-          const data = await response.json();
-          
-          if (data.success && data.files) {
-            setProjects(prev => prev.map(p => 
-              p.name === projectName 
-                ? { ...p, files: data.files, isLoading: false }
-                : p
-            ));
-            console.log(`✅ Files loaded for ${projectName}:`, data.files.length);
-          }
-        } catch (error) {
-          console.error(`❌ Error loading files for ${projectName}:`, error);
-          setProjects(prev => prev.map(p => 
-            p.name === projectName 
-              ? { ...p, isLoading: false }
-              : p
-          ));
-        }
-      }
-    }
+  const toggleProject = (project: string) => {
+    setSelectedProjects(prev =>
+      prev.includes(project)
+        ? prev.filter(p => p !== project)
+        : [...prev, project]
+    );
   };
 
   const close = () => {
-    try { 
-      window?.parent?.postMessage({ type: "dpac.widget.closeSourcePicker" }, "*"); 
-    } catch {}
+    try { window?.parent?.postMessage({ type: "dpac.widget.closeSourcePicker" }, "*"); } catch {}
   };
 
-  const confirmSelection = () => {
-    if (selectedProject) {
-      console.log('📤 SourcePicker: Sending selected project to Chat:', selectedProject);
+  const openFileSelect = () => {
+    if (selectedProjects.length > 0) {
+      console.log('📤 SourcePicker: Sending selected projects to FileSelect:', selectedProjects);
       try { 
-        // Send the selected project directly to chat
         window?.parent?.postMessage({ 
-          type: "dpac.widget.projectSelected", 
-          payload: { project: selectedProject } 
-        }, "*");
-        // Close the source picker
-        window?.parent?.postMessage({ type: "dpac.widget.closeSourcePicker" }, "*");
+          type: "dpac.widget.openFileSelect", 
+          payload: { projects: selectedProjects } 
+        }, "*"); 
         console.log('✅ SourcePicker: Message sent successfully');
       } catch (error) {
         console.error('❌ SourcePicker: Error sending message:', error);
       }
+    } else {
+      console.warn('⚠️ SourcePicker: No projects selected');
     }
   };
 
   return (
     <div style={styles.container as any}>
       <div style={styles.header as any}>
-        <h3 style={styles.headerTitle as any}>Seleziona fonte</h3>
+        <h3 style={styles.headerTitle as any}>Seleziona fonti</h3>
         <button aria-label="Close" title="Close" onClick={close} style={styles.closeBtn as any}>
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden style={iconStyle}>
             <path d="M1 1l12 12M13 1L1 13" stroke="#000" strokeWidth="2" strokeLinecap="round" />
@@ -312,7 +237,7 @@ export default function SourceCard(): React.ReactElement {
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden style={{ ...iconStyle, color: "#A0A8AC" }}>
             <path fill="#A0A8AC" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L20 21.5 21.5 20l-6-6zm-6 0C8.01 14 6 11.99 6 9.5S8.01 5 10.5 5 15 7.01 15 9.5 12.99 14 10.5 14z" />
           </svg>
-          <input placeholder="Cerca progetti..." aria-label="Cerca progetti" style={styles.searchInput as any} />
+          <input placeholder="Cerca progetti o file..." aria-label="Cerca progetti o file" style={styles.searchInput as any} />
         </div>
       </div>
 
@@ -321,51 +246,30 @@ export default function SourceCard(): React.ReactElement {
           <div style={{ textAlign: 'center', padding: '20px', color: '#A0A8AC', fontSize: 12 }}>
             Caricamento fonti...
           </div>
-        ) : projects.length === 0 ? (
+        ) : folders.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '20px', color: '#A0A8AC', fontSize: 12 }}>
             Nessuna fonte disponibile
           </div>
         ) : (
-          projects.map((project) => {
-            const isSelected = selectedProject === project.name;
-            const isExpanded = expandedProjects.includes(project.name);
-            const isProjectHovered = hoveredItem === project.name;
-            
+          folders.map((folder) => {
+            const isSelected = selectedProjects.includes(folder.name);
+            const isHovered = hoveredItem === folder.name;
             return (
-              <div key={project.name} style={{ marginBottom: 12 }}>
-                {/* Project row */}
+              <div key={folder.name} style={{ marginBottom: 12 }}>
                 <div
                   style={{
-                    ...(styles.projectRow as any),
-                    background: isProjectHovered ? "#F9FAFB" : "#FFFFFF",
+                    ...(styles.item as any),
+                    background: isHovered ? "#F9FAFB" : "#FFFFFF",
                     borderColor: isSelected ? "#334C66" : "#F1F5F9",
                   }}
-                  onMouseEnter={() => setHoveredItem(project.name)}
+                  onClick={() => toggleProject(folder.name)}
+                  onMouseEnter={() => setHoveredItem(folder.name)}
                   onMouseLeave={() => setHoveredItem(null)}
                 >
-                  <div 
-                    style={{ ...styles.left as any, flex: 1, cursor: 'pointer' }}
-                    onClick={() => toggleProject(project.name)}
-                  >
-                    {/* Expand/Collapse Arrow */}
-                    <svg 
-                      width="16" 
-                      height="16" 
-                      viewBox="0 0 24 24" 
-                      aria-hidden 
-                      style={{ 
-                        ...iconStyle,
-                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                        transition: 'transform 0.2s ease'
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleExpanded(project.name);
-                      }}
-                    >
-                      <path fill="#111827" d="M8 5l8 7-8 7" />
+                  <div style={styles.left as any}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden style={iconStyle}>
+                      <path fill="#111827" d={"M8 5l8 7-8 7"} />
                     </svg>
-                    
                     <div style={styles.folderCircle as any}>
                       <img
                         src="/dpac-embed/images/srclogo.svg"
@@ -373,67 +277,19 @@ export default function SourceCard(): React.ReactElement {
                         style={{ width: 16, height: 16, display: "block" }}
                       />
                     </div>
-                    <span style={styles.projectText as any}>{project.name}</span>
+                    <span style={styles.itemText as any}>{folder.name}</span>
                   </div>
-                  
-                  {/* Radio Button */}
-                  <div 
-                    style={{
-                      ...(styles.radioButton as any),
-                      ...(isSelected ? styles.radioButtonSelected : {})
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleProject(project.name);
-                    }}
-                  >
+                  <div style={{
+                    ...(styles.checkbox as any),
+                    ...(isSelected ? styles.checkboxChecked : {})
+                  }}>
                     {isSelected && (
-                      <div style={styles.radioButtonInner as any}></div>
+                      <svg width="12" height="10" viewBox="0 0 12 10" fill="none">
+                        <path d="M1 5l3 3 7-7" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
                     )}
                   </div>
                 </div>
-
-                {/* Files dropdown (no checkboxes, just view) */}
-                {isExpanded && (
-                  <div style={styles.filesContainer as any}>
-                    {project.isLoading ? (
-                      <div style={{ 
-                        textAlign: 'center', 
-                        padding: '10px', 
-                        color: '#A0A8AC', 
-                        fontSize: 11 
-                      }}>
-                        Caricamento file...
-                      </div>
-                    ) : project.files.length === 0 ? (
-                      <div style={{ 
-                        textAlign: 'center', 
-                        padding: '10px', 
-                        color: '#A0A8AC', 
-                        fontSize: 11 
-                      }}>
-                        Nessun file trovato
-                      </div>
-                    ) : (
-                      project.files.map((file) => {
-                        const isFileHovered = hoveredItem === file.fullPath;
-                        return (
-                          <div 
-                            key={file.fullPath}
-                            style={{
-                              ...(styles.fileItem as any),
-                              background: isFileHovered ? "#F3F4F6" : "transparent",
-                            }}
-                            onMouseEnter={() => setHoveredItem(file.fullPath)}
-                            onMouseLeave={() => setHoveredItem(null)}
-                          >
-                            📄 {file.name}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
               </div>
             );
           })
@@ -454,13 +310,13 @@ export default function SourceCard(): React.ReactElement {
           type="button" 
           style={{
             ...(styles.confirmBtn as any),
-            opacity: !selectedProject ? 0.5 : 1,
-            cursor: !selectedProject ? "not-allowed" : "pointer"
+            opacity: selectedProjects.length === 0 ? 0.5 : 1,
+            cursor: selectedProjects.length === 0 ? "not-allowed" : "pointer"
           }} 
-          onClick={confirmSelection}
-          disabled={!selectedProject}
+          onClick={openFileSelect}
+          disabled={selectedProjects.length === 0}
           onMouseEnter={(e) => {
-            if (selectedProject) {
+            if (selectedProjects.length > 0) {
               e.currentTarget.style.background = "#2A3D52";
             }
           }}
@@ -472,3 +328,4 @@ export default function SourceCard(): React.ReactElement {
     </div>
   );
 }
+

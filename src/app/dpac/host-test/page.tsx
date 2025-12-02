@@ -7,7 +7,7 @@ export default function HostTestPage() {
       const GAP = 8;
       const CARD_W = 294, CARD_H = 418;
       const MARGIN = 20;
-      const DEBUG = true;
+      const DEBUG = true; // Set to false in production
 
       // ===== SECURITY: Get allowed origin =====
       const ALLOWED_ORIGIN = window.location.origin;
@@ -16,18 +16,28 @@ export default function HostTestPage() {
       const launcher = document.getElementById('dpac-launcher');
       const chat = document.getElementById('dpac-modal');
       const picker = document.getElementById('dpac-source-picker');
+      const fileSel = document.getElementById('dpac-file-select');
 
       // ===== IFRAME LIFECYCLE STATE =====
       const iframeState = {
         launcher: false,
         modal: false,
-        sourcePicker: false
+        sourcePicker: false,
+        fileSelect: false
       };
 
       // ===== LOAD TIMEOUT TRACKING =====
       const loadTimeouts = {
         modal: null,
-        sourcePicker: null
+        sourcePicker: null,
+        fileSelect: null
+      };
+
+      // ===== MESSAGE QUEUE (for messages sent before iframe is ready) =====
+      const messageQueue = {
+        modal: [],
+        sourcePicker: [],
+        fileSelect: []
       };
 
       // ===== UTILITY FUNCTIONS =====
@@ -55,12 +65,14 @@ export default function HostTestPage() {
 
       function isAnyModalOpen() {
         return (chat && chat.style.display === 'block') ||
-               (picker && picker.style.display === 'block');
+               (picker && picker.style.display === 'block') ||
+               (fileSel && fileSel.style.display === 'block');
       }
 
       function closeAll() {
         hide(chat);
         hide(picker);
+        hide(fileSel);
         hideBackdrop();
         updateEmergencyClose();
         log('All modals closed');
@@ -100,6 +112,7 @@ export default function HostTestPage() {
           if (!iframeState[iframeName]) {
             logError(iframeName + ' failed to load within 10 seconds');
             
+            // Afficher un message d'erreur dans l'iframe
             const errorOverlay = document.createElement('div');
             errorOverlay.style.cssText = \`
               position: absolute;
@@ -121,8 +134,8 @@ export default function HostTestPage() {
                 <circle cx="12" cy="12" r="10" stroke="#EF4444" stroke-width="2"/>
                 <path d="M12 8v4M12 16h.01" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
               </svg>
-              <h3 style="margin: 0 0 8px 0; color: #111; font-size: 16px;">Widget non disponibile</h3>
-              <p style="margin: 0 0 16px 0; color: #666; font-size: 13px;">Il widget non risponde. Verifica la connessione.</p>
+              <h3 style="margin: 0 0 8px 0; color: #111; font-size: 16px;">Widget non disponible</h3>
+              <p style="margin: 0 0 16px 0; color: #666; font-size: 13px;">Le widget ne répond pas. Vérifiez votre connexion.</p>
               <button id="error-close-btn" style="
                 padding: 8px 16px;
                 background: #334C66;
@@ -131,7 +144,7 @@ export default function HostTestPage() {
                 border-radius: 6px;
                 cursor: pointer;
                 font-size: 13px;
-              ">Chiudi</button>
+              ">Fermer</button>
             \`;
             
             if (iframeEl && iframeEl.parentElement) {
@@ -144,7 +157,7 @@ export default function HostTestPage() {
               }
             }
           }
-        }, 10000);
+        }, 10000); // 10 secondes
       }
 
       // ===== POSITIONING FUNCTIONS =====
@@ -159,6 +172,16 @@ export default function HostTestPage() {
         picker.style.right = MARGIN+'px'; 
         picker.style.bottom = MARGIN+'px'; 
         chat.style.right = (MARGIN + CARD_W + GAP)+'px'; 
+        chat.style.bottom = MARGIN+'px'; 
+      }
+
+      function placeThree() { 
+        if(!chat||!picker||!fileSel) return; 
+        fileSel.style.right = MARGIN+'px'; 
+        fileSel.style.bottom = MARGIN+'px'; 
+        picker.style.right = (MARGIN + CARD_W + GAP)+'px'; 
+        picker.style.bottom = MARGIN+'px'; 
+        chat.style.right = (MARGIN + 2*(CARD_W + GAP))+'px'; 
         chat.style.bottom = MARGIN+'px'; 
       }
 
@@ -180,7 +203,7 @@ export default function HostTestPage() {
                data.type.startsWith('dpac.widget.');
       }
 
-      // ===== IFRAME COMMUNICATION =====
+      // ===== IFRAME READY CHECK =====
       function sendToIframe(iframeEl, iframeName, message) {
         if (!iframeEl || !iframeEl.contentWindow) {
           logError('Cannot send message - iframe not found:', iframeName);
@@ -197,6 +220,22 @@ export default function HostTestPage() {
         }
       }
 
+      function processQueuedMessages(iframeName) {
+        const queue = messageQueue[iframeName];
+        if (!queue || queue.length === 0) return;
+
+        log('Processing', queue.length, 'queued messages for', iframeName);
+        while (queue.length > 0) {
+          const msg = queue.shift();
+          const iframeEl = iframeName === 'modal' ? chat :
+                          iframeName === 'sourcePicker' ? picker :
+                          iframeName === 'fileSelect' ? fileSel : null;
+          if (iframeEl) {
+            sendToIframe(iframeEl, iframeName, msg);
+          }
+        }
+      }
+
       // ===== MESSAGE HANDLER =====
       window.addEventListener('message', function(ev) {
         try {
@@ -208,6 +247,7 @@ export default function HostTestPage() {
 
           // ===== Validate message structure =====
           if (!isValidMessage(ev.data)) {
+            // Silently ignore invalid messages (could be from other scripts)
             return;
           }
 
@@ -223,9 +263,15 @@ export default function HostTestPage() {
               iframeState[source] = true;
               log('Iframe loaded:', source);
               
+              // Clear load timeout
               if (loadTimeouts[source]) {
                 clearTimeout(loadTimeouts[source]);
                 loadTimeouts[source] = null;
+              }
+              
+              // Process any queued messages
+              if (source !== 'launcher') {
+                processQueuedMessages(source);
               }
             }
             return;
@@ -254,7 +300,8 @@ export default function HostTestPage() {
             if(enoughWidth(2)) {
               placeTwo(); 
             } else { 
-              picker.style.right = MARGIN+'px'; 
+              // stack picker above chat
+              picker.style.right = (MARGIN + Math.max(0, Math.floor((CARD_W - CARD_W)/2)))+'px'; 
               picker.style.bottom = (MARGIN + CARD_H + GAP)+'px'; 
               placeOne(); 
             }
@@ -264,16 +311,84 @@ export default function HostTestPage() {
 
           if (msgType === 'dpac.widget.closeSourcePicker') { 
             hide(picker); 
-            placeOne();
+            if (fileSel && fileSel.style.display === 'block') { 
+              if(enoughWidth(2)) { 
+                // fileSel + chat
+                fileSel.style.right = MARGIN+'px'; 
+                fileSel.style.bottom = MARGIN+'px'; 
+                chat.style.right = (MARGIN + CARD_W + GAP)+'px';
+              } else { 
+                // vertical
+                fileSel.style.right = MARGIN+'px'; 
+                fileSel.style.bottom = MARGIN+'px'; 
+                chat.style.right = MARGIN+'px'; 
+                chat.style.bottom = (MARGIN + CARD_H + GAP)+'px'; 
+              }
+            } else { 
+              placeOne(); 
+            }
             updateEmergencyClose();
           }
 
-          if (msgType === 'dpac.widget.projectSelected') {
-            log('Project selected:', payload?.project);
-            // Forward to chat modal
-            if (chat && chat.contentWindow) {
-              sendToIframe(chat, 'modal', ev.data);
+          if (msgType === 'dpac.widget.openFileSelect') { 
+            show(fileSel); 
+            
+            // Forward the message to FileSelect iframe with payload
+            if (fileSel && fileSel.contentWindow) {
+              sendToIframe(fileSel, 'fileSelect', ev.data);
             }
+            
+            if (picker && picker.style.display === 'block') { 
+              if(enoughWidth(3)) {
+                placeThree(); 
+              } else { 
+                // vertical stack
+                fileSel.style.right = MARGIN+'px'; 
+                fileSel.style.bottom = MARGIN+'px'; 
+                picker.style.right = MARGIN+'px'; 
+                picker.style.bottom = (MARGIN + CARD_H + GAP)+'px'; 
+                chat.style.right = MARGIN+'px'; 
+                chat.style.bottom = (MARGIN + 2*(CARD_H + GAP))+'px'; 
+              }
+            } else { 
+              // no picker, align file + chat
+              if(enoughWidth(2)) { 
+                fileSel.style.right = MARGIN+'px'; 
+                fileSel.style.bottom = MARGIN+'px'; 
+                chat.style.right = (MARGIN + CARD_W + GAP)+'px'; 
+                chat.style.bottom = MARGIN+'px'; 
+              } else { 
+                // vertical
+                fileSel.style.right = MARGIN+'px'; 
+                fileSel.style.bottom = MARGIN+'px'; 
+                chat.style.right = MARGIN+'px'; 
+                chat.style.bottom = (MARGIN + CARD_H + GAP)+'px'; 
+              }
+            }
+            updateEmergencyClose();
+            startLoadTimeout('fileSelect', fileSel);
+          }
+
+          if (msgType === 'dpac.widget.closeFileSelect') { 
+            hide(fileSel); 
+            if (picker && picker.style.display === 'block') { 
+              if(enoughWidth(2)) {
+                placeTwo(); 
+              } else { 
+                picker.style.right = MARGIN+'px'; 
+                picker.style.bottom = MARGIN+'px'; 
+                chat.style.right = MARGIN+'px'; 
+                chat.style.bottom = (MARGIN + CARD_H + GAP)+'px'; 
+              } 
+            } else { 
+              placeOne(); 
+            }
+            updateEmergencyClose();
+          }
+
+          if (msgType === 'dpac.widget.filesSelected') {
+            log('Files selected:', payload);
+            // Here you would typically process the selected files
           }
 
         } catch(e) {
@@ -293,7 +408,7 @@ export default function HostTestPage() {
         }
       });
 
-      // ===== INITIALIZATION =====
+      // ===== INITIALIZATION - Create backdrop and emergency close button =====
       (function initializeOverlayControls() {
         // Create backdrop
         const backdrop = document.createElement('div');
@@ -319,8 +434,8 @@ export default function HostTestPage() {
         // Create emergency close button
         const emergencyBtn = document.createElement('button');
         emergencyBtn.id = 'dpac-emergency-close';
-        emergencyBtn.setAttribute('aria-label', 'Chiudi il widget');
-        emergencyBtn.setAttribute('title', 'Chiudi');
+        emergencyBtn.setAttribute('aria-label', 'Fermer le widget');
+        emergencyBtn.setAttribute('title', 'Fermer');
         emergencyBtn.style.cssText = \`
           position: fixed;
           top: 10px;
@@ -361,7 +476,16 @@ export default function HostTestPage() {
 
       // ===== RESIZE HANDLER =====
       window.addEventListener('resize', function() {
-        if (picker && picker.style.display === 'block') { 
+        if (fileSel && fileSel.style.display === 'block') { 
+          if(picker && picker.style.display === 'block') { 
+            if(enoughWidth(3)) placeThree(); 
+          } else { 
+            if(enoughWidth(2)) { 
+              fileSel.style.right = MARGIN+'px'; 
+              chat.style.right = (MARGIN + CARD_W + GAP)+'px'; 
+            } 
+          }
+        } else if (picker && picker.style.display === 'block') { 
           if(enoughWidth(2)) placeTwo(); 
         }
       });
@@ -370,6 +494,7 @@ export default function HostTestPage() {
       log('DPaC Widget Host initialized');
       log('Allowed origin:', ALLOWED_ORIGIN);
       log('Waiting for iframes to load...');
+      log('Emergency controls ready: backdrop + emergency close button');
 
     })();
   `;
@@ -384,15 +509,15 @@ export default function HostTestPage() {
         style={{ position: 'fixed', bottom: 20, right: 20, width: 60, height: 60, border: 'none', zIndex: 2147483000, background: 'transparent' }}
       />
 
-      {/* Chat Modal */}
+      {/* Chat (card 1) */}
       <iframe
         id="dpac-modal"
-        src="/dpac/modal"
+        src="/dpac/modal?src=about:blank"
         title="DPaC Modal"
         style={{ position: 'fixed', bottom: 20, right: 20, width: 294, height: 418, border: 'none', zIndex: 2147483001, display: 'none', background: 'transparent' }}
       />
 
-      {/* Source Picker */}
+      {/* Source Picker (card 2) */}
       <iframe
         id="dpac-source-picker"
         src="/dpac/source-picker"
@@ -400,7 +525,16 @@ export default function HostTestPage() {
         style={{ position: 'fixed', bottom: 20, right: 20, width: 294, height: 418, border: 'none', zIndex: 2147483002, display: 'none', background: 'transparent' }}
       />
 
+      {/* File Select (card 3) */}
+      <iframe
+        id="dpac-file-select"
+        src="/dpac/file-select"
+        title="DPaC File Select"
+        style={{ position: 'fixed', bottom: 20, right: 20, width: 294, height: 418, border: 'none', zIndex: 2147483003, display: 'none', background: 'transparent' }}
+      />
+
       <script dangerouslySetInnerHTML={{ __html: script }} />
     </>
   );
 }
+
