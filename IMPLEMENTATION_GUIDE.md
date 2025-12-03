@@ -1,27 +1,29 @@
 # D.PaC Widget Implementation Guide
 
-> **Version**: 1.0.0  
-> **Date**: November 28, 2025  
+> **Version**: 1.1.0  
+> **Date**: December 3, 2025  
 > **Authors**: Zakaria (Backend/AI), Hamid (Full-stack), reviewed by Guglielmo (PM)  
-> **Repository**: `https://github.dxc.com/hfnighar/dpac-widget/tree/main3`
+> **Repository**: `https://github.com/zakaria-hamane/widget-dpac/tree/develop`
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#1-overview)
-   - [1.4 DPaC Platform Architecture](#14-dpac-platform-architecture) ⭐ NEW
+   - [1.4 DPaC Platform Architecture](#14-dpac-platform-architecture)
 2. [Architecture](#2-architecture)
-3. [Current Implementation Status](#3-current-implementation-status)
+3. [Current Implementation Status](#3-current-implementation-status) ⭐ UPDATED
 4. [Frontend Integration Guide](#4-frontend-integration-guide)
-   - [4.5 Authentication Handoff (DPaC JWT Reuse)](#45-authentication-handoff-dpac-jwt-reuse) ⭐ UPDATED
+   - [4.5 Authentication Handoff (DPaC JWT Reuse)](#45-authentication-handoff-dpac-jwt-reuse)
 5. [Hosting & Operations Guide](#5-hosting--operations-guide)
-6. [API Reference](#6-api-reference)
+6. [API Reference](#6-api-reference) ⭐ UPDATED
 7. [Widget Events Reference](#7-widget-events-reference)
-8. [Security Considerations](#8-security-considerations)
+8. [Security Considerations](#8-security-considerations) ⭐ UPDATED
 9. [Troubleshooting](#9-troubleshooting)
-   - [9.0 DPaC-Specific Issues](#90-dpac-specific-issues) ⭐ NEW
-10. [Development Responsibilities](#10-development-responsibilities)
+   - [9.0 DPaC-Specific Issues](#90-dpac-specific-issues)
+10. [Development Responsibilities](#10-development-responsibilities) ⭐ UPDATED
+
+> 📄 **See also**: [Authentication & Security Documentation](./docs/AUTHENTICATION_SECURITY.md) for detailed JWT/WSO2 implementation guide.
 
 ---
 
@@ -86,10 +88,10 @@ D.PaC (Document Processing and Chat) is an embeddable chat widget that allows us
 
 | Requirement | Description | Status |
 |-------------|-------------|--------|
-| **Auth without second login** | JWT passed from host → session cookie | ❌ Not implemented |
+| **Auth without second login** | JWT passed from host → session cookie | ✅ Implemented |
 | **Overlay control** | Host can close widget even if it doesn't respond | ✅ Implemented |
-| **Streaming responses** | Real-time token streaming via SSE | ❌ Not implemented |
-| **Cross-origin iframe** | Widget embedded via iframe with proper cookie handling | ⚠️ Partial |
+| **Streaming responses** | Real-time token streaming via SSE | ✅ Implemented |
+| **Cross-origin iframe** | Widget embedded via iframe with proper cookie handling | ✅ Implemented |
 
 ### 1.3 Stakeholders
 
@@ -256,11 +258,13 @@ The existing JWT from DLWEB is sufficient for widget authentication because:
 | Endpoint | Method | Purpose | Status |
 |----------|--------|---------|--------|
 | `/api/chat` | POST | Proxy to vector inference | ✅ Implemented |
+| `/api/chat/poll` | GET | Poll Celery for async responses | ✅ Implemented |
 | `/api/minio/folders` | GET | List MinIO folders | ✅ Implemented |
 | `/api/minio/files` | GET | List files in folder | ✅ Implemented |
 | `/api/minio/test` | GET | Test MinIO connection | ✅ Implemented |
-| `/dpac/session` | POST | Create auth session | ❌ Not implemented |
-| `/chat/stream` | GET | SSE streaming | ❌ Not implemented |
+| `/api/health` | GET | Health check endpoint | ✅ Implemented |
+| `/dpac/session` | POST | Create auth session (JWT → cookie) | ✅ Implemented |
+| `/chat/stream` | GET | SSE streaming | ✅ Implemented |
 
 ---
 
@@ -290,14 +294,21 @@ The existing JWT from DLWEB is sufficient for widget authentication because:
 - Response display
 - Loading states
 
-### 3.2 What's Missing
+### 3.2 Recently Implemented (December 2025)
+
+| Feature | Priority | Status | Description |
+|---------|----------|--------|-------------|
+| `/dpac/session` endpoint | **HIGH** | ✅ Done | JWT validation and session cookie creation |
+| SSE Streaming | **HIGH** | ✅ Done | Real-time token streaming via `/chat/stream` |
+| Async Task Polling | **HIGH** | ✅ Done | Celery/Flower polling via `/api/chat/poll` |
+| JWT/WSO2 Validation | **HIGH** | ✅ Done | Full WSO2 JWKS signature verification |
+| Health Check | **MEDIUM** | ✅ Done | `/api/health` endpoint |
+
+### 3.3 Remaining Items
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| `/dpac/session` endpoint | **HIGH** | JWT validation and session cookie creation |
-| SSE Streaming | **HIGH** | Real-time token streaming via EventSource |
 | Auth events | **MEDIUM** | `dpac.auth: ok\|fail`, `dpac.widget.ready` |
-| CORS configuration | **MEDIUM** | Proper headers in next.config.js |
 | Login modal fallback | **MEDIUM** | In-widget login when session fails |
 | postMessage origin validation | **MEDIUM** | Replace `"*"` with specific origin |
 | `dpac-embed.min.js` | **LOW** | Bundled embed script (currently placeholder) |
@@ -2104,11 +2115,13 @@ List files in a folder.
 }
 ```
 
-### 6.4 POST /dpac/session (To Be Implemented)
+### 6.4 POST /dpac/session ✅ Implemented
 
 Create authenticated session using the existing DPaC Portal JWT.
 
 > **Key**: This endpoint accepts the same JWT already used by DLWEB (issued by WSO2). No new authentication required.
+>
+> **Documentation**: See [docs/AUTHENTICATION_SECURITY.md](./docs/AUTHENTICATION_SECURITY.md) for detailed implementation guide.
 
 **Request:**
 
@@ -2200,7 +2213,7 @@ WSO2_JWKS_URI_PROD=https://identity.cloud.sbn.it/t/ispc.it/oauth2/jwks
 WSO2_JWKS_URI_STAGING=https://identity-collaudo.cloud.sbn.it/t/coll.ispc.it/oauth2/jwks
 ```
 
-### 6.5 GET /chat/stream (To Be Implemented)
+### 6.5 GET /chat/stream ✅ Implemented
 
 SSE endpoint for streaming responses.
 
@@ -2293,16 +2306,17 @@ Host App                          Widget (iframe)
 
 ## 8. Security Considerations
 
-### 8.1 Current Security Issues
+### 8.1 Current Security Status
 
-| Issue | Severity | Current State | Recommendation |
-|-------|----------|---------------|----------------|
-| postMessage uses `"*"` | **HIGH** | All events use wildcard origin | Replace with specific origin |
-| No auth on APIs | **HIGH** | APIs are open | Implement session validation |
-| JWT not validated | **HIGH** | No `/dpac/session` | Implement WSO2 JWT validation |
-| MinIO creds in env | **MEDIUM** | Using env vars | Ensure `.env` is gitignored |
-| Backend endpoint open | **MEDIUM** | `http://72.146.30.121:8002` exposed | Restrict to internal network |
-| No CSRF protection | **MEDIUM** | No CSRF tokens | Add CSRF for session endpoint |
+| Issue | Severity | Status | Notes |
+|-------|----------|--------|-------|
+| JWT validation | **HIGH** | ✅ Fixed | WSO2 JWKS validation implemented in `/dpac/session` |
+| Session cookies | **HIGH** | ✅ Fixed | HttpOnly, Secure, SameSite=None cookies |
+| User type detection | **HIGH** | ✅ Fixed | LDAP (email) and SPID (fiscalNumber) supported |
+| postMessage uses `"*"` | **MEDIUM** | ⚠️ Pending | Replace with specific origin |
+| MinIO creds in env | **MEDIUM** | ✅ OK | Using env vars, `.env` is gitignored |
+| Backend endpoint open | **MEDIUM** | ⚠️ Review | `http://72.146.30.121:8002` - restrict to internal network |
+| CSRF protection | **LOW** | ⚠️ Pending | Consider adding CSRF tokens |
 
 ### 8.1.1 DPaC-Specific Security Requirements
 
@@ -2713,13 +2727,14 @@ This section clearly outlines what needs to be developed by each team:
 
 These are the features and fixes that need to be implemented **in this widget codebase**.
 
-#### 10.1.1 API Endpoints (Backend - Must Implement)
+#### 10.1.1 API Endpoints (Backend)
 
 | Endpoint | Priority | Status | Description |
 |----------|----------|--------|-------------|
-| `POST /dpac/session` | **HIGH** | ❌ TODO | JWT validation & session cookie creation |
-| `GET /chat/stream` | **HIGH** | ❌ TODO | SSE streaming for real-time responses |
-| `GET /api/health` | **MEDIUM** | ❌ TODO | Health check for monitoring |
+| `POST /dpac/session` | **HIGH** | ✅ Done | JWT validation & session cookie creation |
+| `GET /chat/stream` | **HIGH** | ✅ Done | SSE streaming for real-time responses |
+| `GET /api/chat/poll` | **HIGH** | ✅ Done | Celery/Flower polling for async responses |
+| `GET /api/health` | **MEDIUM** | ✅ Done | Health check for monitoring |
 
 **`POST /dpac/session` Requirements (DPaC-Specific):**
 - [ ] Accept existing DPaC JWT from Authorization header or request body
@@ -2778,14 +2793,15 @@ These are the features and fixes that need to be implemented **in this widget co
 - [ ] Emit `dpac.widget.error` with `{ code, message }` on failures
 - [ ] Emit `dpac.auth` with `{ status: "ok" | "fail", reason? }`
 
-#### 10.1.4 Security Fixes (Must Implement)
+#### 10.1.4 Security Fixes
 
 | Issue | Priority | Status | Description |
 |-------|----------|--------|-------------|
-| WSO2 JWT validation | **HIGH** | ❌ TODO | Validate JWT against WSO2 issuer |
-| postMessage origin | **HIGH** | ❌ TODO | Replace `"*"` with specific origin |
-| CORS headers | **MEDIUM** | ❌ TODO | Add proper CORS in next.config.js |
-| Input validation | **MEDIUM** | ❌ TODO | Validate all API inputs |
+| WSO2 JWT validation | **HIGH** | ✅ Done | Validate JWT against WSO2 issuer |
+| Session cookie security | **HIGH** | ✅ Done | HttpOnly, Secure, SameSite=None |
+| postMessage origin | **MEDIUM** | ⚠️ Pending | Replace `"*"` with specific origin |
+| CORS headers | **MEDIUM** | ⚠️ Pending | Add proper CORS in next.config.js |
+| Input validation | **MEDIUM** | ⚠️ Pending | Validate all API inputs |
 
 **WSO2 JWT Validation Implementation (Widget Backend):**
 
@@ -3191,9 +3207,13 @@ See full examples in:
 ### 10.4 📋 IMPLEMENTATION CHECKLIST
 
 #### Widget Team Checklist
-- [ ] Implement `POST /dpac/session` endpoint
-- [ ] Implement `GET /chat/stream` SSE endpoint
-- [ ] Implement `GET /api/health` endpoint
+- [x] Implement `POST /dpac/session` endpoint ✅
+- [x] Implement `GET /chat/stream` SSE endpoint ✅
+- [x] Implement `GET /api/chat/poll` polling endpoint ✅
+- [x] Implement `GET /api/health` endpoint ✅
+- [x] WSO2 JWT validation with JWKS ✅
+- [x] Session cookie creation (HttpOnly, Secure) ✅
+- [x] LDAP/SPID user type detection ✅
 - [ ] Add SSE consumer to ChatCard component
 - [ ] Create login modal fallback
 - [ ] Emit `dpac.widget.ready` event
@@ -3202,7 +3222,7 @@ See full examples in:
 - [ ] Fix postMessage security (replace `"*"`)
 - [ ] Add CORS headers in next.config.js
 - [ ] Build `dpac-embed.min.js` bundle
-- [ ] Document environment variables
+- [x] Document environment variables ✅
 
 #### Portal Developer Checklist
 - [ ] ~~Implement JWT minting for widget~~ **Not needed** - reuse existing WSO2 JWT
@@ -3253,6 +3273,10 @@ See full examples in:
 
 ```
 dpac-widget-main/
+├── docs/
+│   ├── api-docs.json
+│   ├── AUTHENTICATION_SECURITY.md  # ✅ JWT/WSO2 auth documentation
+│   └── DXC - Manuale Tecnico Operativo_v1.0.pdf
 ├── public/
 │   └── dpac-embed/
 │       ├── dpac-embed.min.js      # Placeholder (to be built)
@@ -3261,34 +3285,46 @@ dpac-widget-main/
 │           ├── launcher.svg
 │           └── srclogo.svg
 ├── src/
-│   └── app/
-│       ├── api/
-│       │   ├── chat/
-│       │   │   └── route.ts        # POST /api/chat
-│       │   └── minio/
-│       │       ├── files/
-│       │       │   └── route.ts    # GET /api/minio/files
-│       │       ├── folders/
-│       │       │   └── route.ts    # GET /api/minio/folders
-│       │       └── test/
-│       │           └── route.ts    # GET /api/minio/test
-│       ├── dpac/
-│       │   ├── ChatCard.tsx        # Main chat component
-│       │   ├── FileSelectCard.tsx  # File selection component
-│       │   ├── SourceCard.tsx      # Source picker component
-│       │   ├── file-select/
-│       │   │   └── page.tsx        # /dpac/file-select
-│       │   ├── host-test/
-│       │   │   └── page.tsx        # /dpac/host-test (demo)
-│       │   ├── launcher/
-│       │   │   └── page.tsx        # /dpac/launcher
-│       │   ├── modal/
-│       │   │   └── page.tsx        # /dpac/modal
-│       │   ├── source-picker/
-│       │   │   └── page.tsx        # /dpac/source-picker
-│       │   └── page.tsx            # /dpac (redirect)
-│       ├── layout.tsx
-│       └── page.tsx
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── chat/
+│   │   │   │   ├── poll/
+│   │   │   │   │   └── route.ts    # ✅ GET /api/chat/poll (Celery polling)
+│   │   │   │   └── route.ts        # POST /api/chat
+│   │   │   ├── health/
+│   │   │   │   └── route.ts        # ✅ GET /api/health
+│   │   │   └── minio/
+│   │   │       ├── files/
+│   │   │       │   └── route.ts    # GET /api/minio/files
+│   │   │       ├── folders/
+│   │   │       │   └── route.ts    # GET /api/minio/folders
+│   │   │       └── test/
+│   │   │           └── route.ts    # GET /api/minio/test
+│   │   ├── chat/
+│   │   │   └── stream/
+│   │   │       └── route.ts        # ✅ GET /chat/stream (SSE)
+│   │   ├── dpac/
+│   │   │   ├── ChatCard.tsx        # Main chat component
+│   │   │   ├── FileSelectCard.tsx  # File selection component
+│   │   │   ├── SourceCard.tsx      # Source picker component
+│   │   │   ├── file-select/
+│   │   │   │   └── page.tsx        # /dpac/file-select
+│   │   │   ├── host-test/
+│   │   │   │   └── page.tsx        # /dpac/host-test (demo)
+│   │   │   ├── launcher/
+│   │   │   │   └── page.tsx        # /dpac/launcher
+│   │   │   ├── modal/
+│   │   │   │   └── page.tsx        # /dpac/modal
+│   │   │   ├── session/
+│   │   │   │   └── route.ts        # ✅ POST /dpac/session (JWT auth)
+│   │   │   ├── source-picker/
+│   │   │   │   └── page.tsx        # /dpac/source-picker
+│   │   │   └── page.tsx            # /dpac (redirect)
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   └── lib/
+│       ├── dpac-auth.ts            # ✅ JWT validation & session management
+│       └── supabase.ts
 ├── .env.local                      # Environment variables (gitignored)
 ├── next.config.js
 ├── package.json
@@ -3329,5 +3365,5 @@ dpac-widget-main/
 
 ---
 
-*Last updated: November 28, 2025*
+*Last updated: December 3, 2025*
 
